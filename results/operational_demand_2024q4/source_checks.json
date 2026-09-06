@@ -1,0 +1,36 @@
+{
+  "source": "AEMO Quarterly Energy Dynamics Q4 2024, pages 12-13",
+  "source_url": "https://aemo.com.au/-/media/files/major-publications/qed/2024/qed-q4-2024.pdf",
+  "interpretation": "Archive INTERVAL_DATETIME values match the report's explicitly labelled half-hour-ending extrema. This independently supports interval-end labels and retaining negative regional demand.",
+  "checks": [
+    {
+      "check": "NEM quarterly maximum",
+      "region": "NEM",
+      "interval_end_aest": "2024-12-16 18:00:00",
+      "published_mw": 33716,
+      "archive_mw": 33716.0,
+      "quarterly_extreme_mw": 33716.0,
+      "matches": true
+    },
+    {
+      "check": "NEM quarterly minimum",
+      "region": "NEM",
+      "interval_end_aest": "2024-10-26 11:30:00",
+      "published_mw": 10073,
+      "archive_mw": 10073.0,
+      "quarterly_extreme_mw": 10073.0,
+      "matches": true
+    },
+    {
+      "check": "SA quarterly minimum",
+      "region": "SA1",
+      "interval_end_aest": "2024-10-19 13:00:00",
+      "published_mw": -205,
+      "archive_mw": -205.0,
+      "quarterly_extreme_mw": -205.0,
+      "matches": true
+    }
+  ],
+  "regional_negative_observations": 36,
+  "panel_sha256": "39d22b45fc27fb79fcf3c1153f5522c3ad3f4a127e1074b0b9c59a30a71f5fe2"
+}

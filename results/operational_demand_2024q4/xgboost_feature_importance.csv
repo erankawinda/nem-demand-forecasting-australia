@@ -1,0 +1,16 @@
+feature,model_feature_importance
+demand_last_complete_half_hour_mw,0.8008174
+demand_lag_1_mw,0.11790946
+target_time_sin,0.039982792
+target_time_cos,0.014699589
+demand_same_slot_previous_week_mw,0.0067886524
+demand_mean_previous_24h_mw,0.0036134785
+demand_same_slot_previous_day_mw,0.0025420066
+target_month_sin,0.0024998975
+target_is_weekend,0.0023523227
+demand_mean_previous_7d_mw,0.0019273049
+target_week_cos,0.0017778517
+target_week_sin,0.0017317946
+target_month_cos,0.0015174994
+demand_std_previous_7d_mw,0.0009771477
+demand_std_previous_24h_mw,0.0008629151

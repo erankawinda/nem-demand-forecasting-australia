@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Build a clean 30-minute NEM demand panel with optional generation data.
+"""Read legacy five-minute dispatch demand, with optional generation data.
+
+For the measured operational-demand target, use prepare_operational_demand.py.
 
 The input layout follows ``nemdata``: parquet files named ``clean.parquet``
 under ``<cache>/demand`` and, optionally, ``<cache>/unit-scada``. Only
@@ -16,7 +18,7 @@ import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CACHE = Path.home() / "nem-data" / "data"
-DEFAULT_OUTPUT = REPO_ROOT / "data" / "processed"
+DEFAULT_OUTPUT = REPO_ROOT / "data" / "processed" / "legacy_dispatch"
 NEM_REGIONS = ("NSW1", "QLD1", "SA1", "TAS1", "VIC1")
 EXPECTED_OBSERVATIONS = 6
 

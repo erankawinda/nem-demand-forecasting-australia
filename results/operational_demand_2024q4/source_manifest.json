@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "quantity": "measured_operational_demand_unadjusted_mw",
+  "unit": "MW",
+  "source_table": "DEMANDOPERATIONALACTUAL",
+  "source_csv_table": [
+    "OPERATIONAL_DEMAND",
+    "ACTUAL",
+    "3"
+  ],
+  "source_field": "OPERATIONAL_DEMAND",
+  "source_documentation": "https://www.aemo.com.au/energy-systems/electricity/national-electricity-market-nem/data-nem/operational-demand-data",
+  "regions": [
+    "NSW1",
+    "QLD1",
+    "SA1",
+    "TAS1",
+    "VIC1"
+  ],
+  "aggregation": "Sum of the five regional measured 30-minute mean demand values.",
+  "adjustment_fields_added": [],
+  "excluded_adjustment_fields": [
+    "OPERATIONAL_DEMAND_ADJUSTMENT",
+    "WDR_ESTIMATE"
+  ],
+  "time_contract": {
+    "timezone": "AEST (UTC+10), fixed throughout the year; no daylight saving",
+    "source_timestamp": "INTERVAL_DATETIME labels the end of the measured half hour",
+    "panel_timestamp": "interval_start = INTERVAL_DATETIME minus 30 minutes",
+    "interval_minutes": 30
+  },
+  "revision_scope": "Historical archive snapshots may include later corrections; publication-time vintages are not reconstructed.",
+  "archives": [
+    {
+      "cache_file": "2024-10.zip",
+      "month": "2024-10",
+      "source_url": "https://www.nemweb.com.au/Data_Archive/Wholesale_Electricity/MMSDM/2024/MMSDM_2024_10/MMSDM_Historical_Data_SQLLoader/DATA/PUBLIC_ARCHIVE%23DEMANDOPERATIONALACTUAL%23FILE01%23202410010000.zip",
+      "retrieved_at_utc": "2026-09-06T12:16:12.649452+00:00",
+      "sha256": "676c2edb42ba2a1a9116732b4cdd93a214a93555bb0873d706b1e5c362e4ba04",
+      "size_bytes": 47976,
+      "http_last_modified": "Tue, 19 May 2026 01:14:16 GMT",
+      "csv_member": "PUBLIC_ARCHIVE#DEMANDOPERATIONALACTUAL#FILE01#202410010000.CSV",
+      "csv_sha256": "8c7a4fc0d236e8d0911ab986f772195edc083b879c8849c7ba5bac410590031f",
+      "csv_control_header": [
+        "C",
+        "SETP.WORLD",
+        "DVD_DEMANDOPERATIONALACTUAL",
+        "AEMO",
+        "PUBLIC",
+        "2024/11/11",
+        "14:23:43",
+        "001731299023004",
+        "MONTHLY_ARCHIVE",
+        "001731299023004"
+      ],
+      "raw_data_rows": 7440,
+      "exact_duplicate_rows": 0
+    },
+    {
+      "cache_file": "2024-11.zip",
+      "month": "2024-11",
+      "source_url": "https://www.nemweb.com.au/Data_Archive/Wholesale_Electricity/MMSDM/2024/MMSDM_2024_11/MMSDM_Historical_Data_SQLLoader/DATA/PUBLIC_ARCHIVE%23DEMANDOPERATIONALACTUAL%23FILE01%23202411010000.zip",
+      "retrieved_at_utc": "2026-09-06T12:16:13.166180+00:00",
+      "sha256": "dad9df6d03038e424e3591bb3abd8fa61721ed04c8232711fefdf09a8b0a14a4",
+      "size_bytes": 46481,
+      "http_last_modified": "Tue, 19 May 2026 01:18:47 GMT",
+      "csv_member": "PUBLIC_ARCHIVE#DEMANDOPERATIONALACTUAL#FILE01#202411010000.CSV",
+      "csv_sha256": "ebfb0c7b55b03d1a4bf8fd4342367a03c8688222cd3568b03b29d198b9c18f50",
+      "csv_control_header": [
+        "C",
+        "SETP.WORLD",
+        "DVD_DEMANDOPERATIONALACTUAL",
+        "AEMO",
+        "PUBLIC",
+        "2024/12/09",
+        "13:04:49",
+        "001733713489267",
+        "MONTHLY_ARCHIVE",
+        "001733713489267"
+      ],
+      "raw_data_rows": 7200,
+      "exact_duplicate_rows": 0
+    },
+    {
+      "cache_file": "2024-12.zip",
+      "month": "2024-12",
+      "source_url": "https://www.nemweb.com.au/Data_Archive/Wholesale_Electricity/MMSDM/2024/MMSDM_2024_12/MMSDM_Historical_Data_SQLLoader/DATA/PUBLIC_ARCHIVE%23DEMANDOPERATIONALACTUAL%23FILE01%23202412010000.zip",
+      "retrieved_at_utc": "2026-09-06T12:16:13.653192+00:00",
+      "sha256": "a9a6b5df2fb8d7295dcd38757d9da5fc9c82125e941843af77807e0088065832",
+      "size_bytes": 48198,
+      "http_last_modified": "Tue, 19 May 2026 01:22:29 GMT",
+      "csv_member": "PUBLIC_ARCHIVE#DEMANDOPERATIONALACTUAL#FILE01#202412010000.CSV",
+      "csv_sha256": "d464ddcdc7f64e870cc4bebd8975d8b2d5c55fdb2144f7fa13ff4dc8e255f3a2",
+      "csv_control_header": [
+        "C",
+        "SETP.WORLD",
+        "DVD_DEMANDOPERATIONALACTUAL",
+        "AEMO",
+        "PUBLIC",
+        "2025/01/10",
+        "14:15:55",
+        "001736482555562",
+        "MONTHLY_ARCHIVE",
+        "001736482555562"
+      ],
+      "raw_data_rows": 7440,
+      "exact_duplicate_rows": 0
+    }
+  ],
+  "coverage": {
+    "requested_start_month": "2024-10",
+    "requested_end_month_inclusive": "2024-12",
+    "interval_start_inclusive": "2024-10-01T00:00:00",
+    "interval_start_exclusive_end": "2025-01-01T00:00:00",
+    "expected_intervals": 4416,
+    "complete_intervals": 4416,
+    "missing_or_incomplete_intervals": 0,
+    "missing_region_observations": 0,
+    "observed_regional_rows": 22080,
+    "exact_duplicate_rows_removed": 0,
+    "rows_outside_requested_window": 0,
+    "missing_intervals": [],
+    "imputation": "none"
+  },
+  "outputs": {
+    "panel_nem_30min.csv": {
+      "sha256": "39d22b45fc27fb79fcf3c1153f5522c3ad3f4a127e1074b0b9c59a30a71f5fe2",
+      "rows": 4416
+    },
+    "regional_operational_demand_30min.csv": {
+      "sha256": "f415fdcfa070ffed4359c8b21694dc4a6558da6c645a89bb21f3b60e0cb536cd",
+      "rows": 22080
+    }
+  }
+}
