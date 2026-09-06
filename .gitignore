@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+
+# Downloaded and generated data
+data/raw/
+data/processed/
+
+# Generated analysis outputs
+reports/
+
+# Local logs and environment files
+*.log
+.env
