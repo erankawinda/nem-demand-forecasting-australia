@@ -1,0 +1,49 @@
+{
+  "verification_date": "2026-09-06",
+  "tests": {
+    "command": "python -m pytest -q --disable-warnings",
+    "passed": 47
+  },
+  "source_cross_checks_passed": 3,
+  "code_and_source_hashes_match": true,
+  "test_predictions": 612,
+  "test_metrics_independently_recomputed": [
+    {
+      "method": "persistence",
+      "mae_recomputed_mw": 487.297385620915,
+      "rmse_recomputed_mw": 625.057641786384,
+      "maximum_absolute_difference_mw": 0.0
+    },
+    {
+      "method": "previous_day",
+      "mae_recomputed_mw": 1026.5343137254902,
+      "rmse_recomputed_mw": 1441.1131823171856,
+      "maximum_absolute_difference_mw": 0.0
+    },
+    {
+      "method": "previous_week",
+      "mae_recomputed_mw": 2134.831699346405,
+      "rmse_recomputed_mw": 3274.8348376753734,
+      "maximum_absolute_difference_mw": 0.0
+    },
+    {
+      "method": "xgboost",
+      "mae_recomputed_mw": 183.37317892156864,
+      "rmse_recomputed_mw": 237.8836321883396,
+      "maximum_absolute_difference_mw": 1.9698766521969446e-05
+    },
+    {
+      "method": "random_forest",
+      "mae_recomputed_mw": 177.9420923775414,
+      "rmse_recomputed_mw": 236.74167817537824,
+      "maximum_absolute_difference_mw": 1.1368683772161603e-13
+    }
+  ],
+  "metric_tolerance_mw": 0.0001,
+  "rounding_note": "XGBoost float32 predictions are written as round-trip decimal strings. Reading those strings as float64 changes aggregate errors by less than 0.0001 MW. Displayed two-decimal metrics are unchanged.",
+  "plots_visually_checked": [
+    "forecast_sample.png",
+    "xgboost_feature_importance.png"
+  ],
+  "protocol_changes_after_metrics": "None."
+}

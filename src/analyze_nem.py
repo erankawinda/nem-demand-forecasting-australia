@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Evaluate 30-minute-ahead NEM demand forecasts chronologically.
+"""Forecast mean NEM demand over the next half hour.
 
-Each example is indexed by a forecast origin ``t``. Its target is demand at
-``t + 30 minutes``. Every input is observed at or before ``t`` or is a calendar
-value already known for the target time.
+At forecast origin ``t``, the last observed half hour is ``[t - 30 min, t)``
+and the target interval is ``[t, t + 30 min)``. A completed interval is assumed
+available at its end; source publication delays are not modelled.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import platform
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import matplotlib
@@ -38,6 +39,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA)
     parser.add_argument("--reports", type=Path, default=DEFAULT_REPORTS)
+    parser.add_argument(
+        "--source-manifest", type=Path,
+        help="Preparation manifest to verify and record the input quantity and hash.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--n-jobs",
@@ -59,11 +64,11 @@ def load_panel(path: Path) -> pd.DataFrame:
     if timestamps.isna().any():
         raise ValueError("The panel contains invalid timestamps.")
     if getattr(timestamps.dt, "tz", None) is not None:
-        timestamps = timestamps.dt.tz_localize(None)
+        timestamps = timestamps.dt.tz_convert(timezone(timedelta(hours=10))).dt.tz_localize(None)
     frame["interval_start"] = timestamps
     demand = pd.to_numeric(frame["NEM_DEMAND_MW"], errors="coerce")
-    if demand.isna().any():
-        raise ValueError("The panel contains missing or non-numeric demand values.")
+    if not np.isfinite(demand).all():
+        raise ValueError("The panel contains missing, non-numeric, or non-finite demand values.")
     if (demand <= 0).any():
         raise ValueError("The panel contains non-positive demand values.")
     frame["NEM_DEMAND_MW"] = demand
@@ -86,6 +91,7 @@ def load_panel(path: Path) -> pd.DataFrame:
 def add_cyclical_time_features(
     features: pd.DataFrame, target_time: pd.DatetimeIndex
 ) -> None:
+    """Describe the target interval by its start in NEM market time."""
     minute_of_day = target_time.hour * 60 + target_time.minute
     features["target_time_sin"] = np.sin(2 * np.pi * minute_of_day / 1440)
     features["target_time_cos"] = np.cos(2 * np.pi * minute_of_day / 1440)
@@ -101,15 +107,20 @@ def add_cyclical_time_features(
 
 
 def build_examples(panel: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-    demand = panel["NEM_DEMAND_MW"]
-    examples = pd.DataFrame(index=panel.index)
+    """Convert a panel indexed by interval start into forecasts at interval end."""
+    demand = panel["NEM_DEMAND_MW"].copy()
+    # A row labelled 00:00 is the mean demand over 00:00–00:30.
+    # It becomes usable at 00:30, not at the original interval-start label.
+    demand.index = panel.index + HALF_HOUR
+    examples = pd.DataFrame(index=demand.index)
     examples.index.name = "forecast_origin"
-    examples["target_time"] = examples.index + HALF_HOUR
+    examples["target_interval_start"] = examples.index
+    examples["target_interval_end"] = examples.index + HALF_HOUR
     examples["target_demand_mw"] = demand.shift(-1)
 
-    # All values below are known at the forecast origin. The offsets of 47 and
-    # 335 half hours line up with the target slot one day/week earlier.
-    examples["demand_now_mw"] = demand
+    # These intervals end at or before the origin. The offsets of 47 and 335
+    # align the completed-interval series with the target slot a day/week ago.
+    examples["demand_last_complete_half_hour_mw"] = demand
     examples["demand_lag_1_mw"] = demand.shift(1)
     examples["demand_same_slot_previous_day_mw"] = demand.shift(47)
     examples["demand_same_slot_previous_week_mw"] = demand.shift(335)
@@ -119,14 +130,14 @@ def build_examples(panel: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     examples["demand_std_previous_7d_mw"] = demand.rolling(336).std()
 
     add_cyclical_time_features(
-        examples, pd.DatetimeIndex(examples["target_time"])
+        examples, pd.DatetimeIndex(examples["target_interval_start"])
     )
     examples["baseline_persistence_mw"] = demand
     examples["baseline_previous_day_mw"] = demand.shift(47)
     examples["baseline_previous_week_mw"] = demand.shift(335)
 
     feature_columns = [
-        "demand_now_mw",
+        "demand_last_complete_half_hour_mw",
         "demand_lag_1_mw",
         "demand_same_slot_previous_day_mw",
         "demand_same_slot_previous_week_mw",
@@ -143,7 +154,8 @@ def build_examples(panel: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
         "target_is_weekend",
     ]
     required_columns = feature_columns + [
-        "target_time",
+        "target_interval_start",
+        "target_interval_end",
         "target_demand_mw",
         "baseline_persistence_mw",
         "baseline_previous_day_mw",
@@ -237,33 +249,33 @@ def fit_and_predict(
 
 
 def save_forecast_plot(predictions: pd.DataFrame, path: Path) -> None:
-    # A fixed final seven-day window keeps the plot readable and deterministic.
+    # The final 336 predictions span seven days when no intervals are missing.
     sample = predictions.tail(7 * 48)
     plt.figure(figsize=(12, 5.5))
     plt.plot(
-        sample["target_time"],
+        sample["target_interval_end"],
         sample["actual_demand_mw"],
         color="#1f2937",
         linewidth=1.8,
         label="Observed",
     )
     plt.plot(
-        sample["target_time"],
+        sample["target_interval_end"],
         sample["persistence_mw"],
         color="#9ca3af",
         linewidth=1.1,
         label="Persistence baseline",
     )
     plt.plot(
-        sample["target_time"],
+        sample["target_interval_end"],
         sample["xgboost_mw"],
         color="#0f766e",
         linewidth=1.2,
         label="XGBoost",
     )
-    plt.xlabel("Target time")
+    plt.xlabel("Target half-hour end (NEM market time)")
     plt.ylabel("NEM demand (MW)")
-    plt.title("Thirty-minute-ahead demand forecasts: final seven test days")
+    plt.title("Next-half-hour mean demand forecasts: final test window")
     plt.legend(frameon=False, ncol=3)
     plt.grid(alpha=0.2)
     plt.tight_layout()
@@ -306,6 +318,17 @@ def main() -> None:
     reports.mkdir(parents=True, exist_ok=True)
 
     data_path = args.data.expanduser().resolve()
+    source_record = None
+    if args.source_manifest is not None:
+        source_path = args.source_manifest.expanduser().resolve()
+        source = json.loads(source_path.read_text(encoding="utf-8"))
+        if source["outputs"]["panel_nem_30min.csv"]["sha256"] != sha256_file(data_path):
+            raise ValueError("Source manifest does not match the input panel hash.")
+        source_record = {
+            "filename": source_path.name,
+            "sha256": sha256_file(source_path),
+            "quantity": source["quantity"],
+        }
     panel = load_panel(data_path)
     examples, feature_columns = build_examples(panel)
     train, validation, test = chronological_split(examples)
@@ -337,7 +360,8 @@ def main() -> None:
     prediction_frame = pd.DataFrame(
         {
             "forecast_origin": test.index,
-            "target_time": test["target_time"].to_numpy(),
+            "target_interval_start": test["target_interval_start"].to_numpy(),
+            "target_interval_end": test["target_interval_end"].to_numpy(),
             "actual_demand_mw": test["target_demand_mw"].to_numpy(),
             "persistence_mw": test_baseline_predictions["persistence"],
             "previous_day_mw": test_baseline_predictions["previous_day"],
@@ -349,8 +373,34 @@ def main() -> None:
     prediction_frame.to_csv(reports / "test_predictions.csv", index=False)
 
     split_manifest = {
+        "schema_version": 3,
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "forecast_task": "next_half_hour_mean_demand",
         "forecast_horizon_minutes": 30,
+        "time_contract": {
+            "source_panel_index": "half-hour interval start in NEM market time",
+            "forecast_origin": "end of the last complete observed half hour",
+            "target_interval": "[forecast_origin, forecast_origin + 30 minutes)",
+            "calendar_features": "target_interval_start",
+            "publication_delay_minutes_assumed": 0,
+            "publication_delay_verified": False,
+            "timezone": "AEST (UTC+10), fixed offset; no daylight saving",
+            "source_revisions": "retrospective archive; original releases not reconstructed",
+        },
         "random_seed": args.seed,
+        "source_manifest": source_record,
+        "code_sha256": {
+            str(path.relative_to(REPO_ROOT)): sha256_file(path)
+            for path in sorted((REPO_ROOT / "src").glob("*.py"))
+        },
+        "requirements_lock_sha256": sha256_file(REPO_ROOT / "requirements-lock.txt"),
+        "model_parameters": {
+            name: {
+                key: "NaN" if isinstance(value, float) and np.isnan(value) else value
+                for key, value in model.get_params().items()
+            }
+            for name, model in final_models.items()
+        },
         "input": {
             "filename": data_path.name,
             "sha256": sha256_file(data_path),
@@ -385,7 +435,7 @@ def main() -> None:
         "feature_columns": feature_columns,
     }
     (reports / "split_manifest.json").write_text(
-        json.dumps(split_manifest, indent=2) + "\n", encoding="utf-8"
+        json.dumps(split_manifest, indent=2, allow_nan=False) + "\n", encoding="utf-8"
     )
 
     save_forecast_plot(prediction_frame, reports / "forecast_sample.png")
