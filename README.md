@@ -1,130 +1,168 @@
 # Australian NEM Demand Forecasting
 
-This is an exploratory data-science project for forecasting total electricity
-demand in Australia's National Electricity Market (NEM) 30 minutes ahead. It
-builds a reproducible 30-minute dataset and compares two tree-based
-models with three simple forecasting baselines.
+A complete, reproducible pipeline for forecasting total electricity demand in
+Australia's National Electricity Market (NEM) 30 minutes ahead. It builds a
+regular half-hour demand panel from public AEMO records and compares XGBoost and
+random-forest models with three transparent forecasting baselines.
 
-The repository is being maintained as a transparent research portfolio project.
-It does **not** estimate the electricity use of AI or data centres, assess grid
-security, predict reserve margins, or identify causal drivers of demand.
+The deliberately limited research question is:
 
-## Research question
+> How accurately can NEM demand at `t + 30 minutes` be forecast using demand
+> observed at or before `t` and calendar information known in advance?
 
-How accurately can NEM demand at time `t + 30 minutes` be forecast using demand
-observed at or before `t` and calendar information known in advance?
+This project does not estimate AI or data-centre electricity use, assess grid
+security or reserve margins, make long-term projections, or identify causal
+drivers of demand.
 
-The analysis reports mean absolute error (MAE) and root mean squared error
-(RMSE) on a final chronological test period. XGBoost and random-forest forecasts
-are compared with:
+## Evaluation design
 
-- persistence: demand observed at the forecast origin;
-- previous day: demand at the same target-time slot one day earlier; and
-- previous week: demand at the same target-time slot one week earlier.
+Every example is indexed by a forecast origin `t`. Its target is demand one
+half-hour later. Inputs contain only information available at `t` or calendar
+information already known for the target time:
 
-No model-performance numbers are stated in this README. They should be produced
-from the data and code version being evaluated.
+- current and one-step-lagged demand;
+- the demand observed at the target slot one day and one week earlier;
+- trailing 24-hour and seven-day demand mean and standard deviation; and
+- cyclical target-time, target-week, target-month, and weekend indicators.
 
-## Method
+The day and week offsets are 47 and 335 half-hours from the origin because the
+target itself is one interval ahead. This alignment is covered by automated
+tests.
 
-`src/make_panel.py` reads `nemdata` demand and unit-SCADA parquet files. It:
+Examples are split in time order: the first 70% for training, the next 15% for
+validation, and the final 15% as an untouched test period. The fixed model
+settings are first evaluated on validation data, then each model is refitted on all
+pre-test observations and evaluated once on the final block. MAE and RMSE are
+reported alongside:
 
-1. reduces overlapping records to one observation per region or generating unit
-   and five-minute timestamp;
-2. converts five-minute demand and generation observations into half-hour means;
-3. keeps a regional half hour only when all six five-minute observations exist;
-4. keeps NEM demand only when all five NEM regions are complete;
-5. keeps generation half hours only when all six observations exist; and
-6. joins demand and generation on their common timestamps.
+- persistence: demand at the forecast origin;
+- previous day: demand at the same target slot one day earlier; and
+- previous week: demand at the same target slot one week earlier.
 
-The panel retains both average generation power (`NEM_GEN_AVG_MW`) and the
-corresponding half-hour energy (`NEM_GEN_ENERGY_MWH`). Generation is preserved
-for descriptive follow-up work but is deliberately not used as an input to the
-demand-forecasting models.
+The test period is a rolling one-step evaluation: observed demand up to each
+test origin is available. It is not a recursive multi-step forecast.
 
-`src/analyze_nem.py` first reindexes the panel to a regular 30-minute grid so
-missing periods remain missing. It constructs a target exactly one half hour
-ahead and uses only past/current demand values plus target-time calendar
-features. The observations are split in time order:
+## Data preparation
 
-- first 70%: training;
-- next 15%: validation; and
-- final 15%: untouched test period.
+`src/make_panel.py` reads `clean.parquet` files produced by
+[`nemdata`](https://github.com/ADGEfficiency/nem-data) from public Australian
+Energy Market Operator (AEMO) [NEM
+records](https://www.aemo.com.au/energy-systems/electricity/national-electricity-market-nem/data-nem).
+It:
 
-Model settings are fixed in the script. After the validation check, each model
-is refitted on the combined training and validation periods and evaluated once
-on the final test block. The generated split manifest records exact dates and
-feature names.
+1. resolves exact duplicate source rows and rejects conflicting revisions;
+2. converts five-minute regional demand readings to half-hour means;
+3. retains a regional half-hour only when all six readings are present; and
+4. retains total NEM demand only when all five NEM regions are complete.
 
-## Data
+The core forecasting panel depends only on demand data. With
+`--include-generation`, the same script also aggregates unit-SCADA readings to
+average MW and half-hour MWh and left-joins them as optional descriptive
+columns. Generation coverage never removes an otherwise complete demand row,
+and generation is not used as a forecasting input.
 
-The input data are obtained through [`nemdata`](https://github.com/ADGEfficiency/nem-data),
-which prepares public Australian Energy Market Operator (AEMO) records. Follow
-that project's current instructions to create `clean.parquet` files under:
-
-```text
-<cache>/demand/
-<cache>/unit-scada/
-```
-
-Raw and processed datasets are intentionally excluded from Git because they are
-large and are governed by their source terms. Check AEMO documentation and the
-downloaded files before interpreting timestamps, revisions, or measurement
-fields. The preparation script uses `interval-start` when the source provides
-it. As a fallback, it treats `SETTLEMENTDATE` as the end of a five-minute
-dispatch interval and labels the containing half hour by its start.
+Raw and processed datasets are excluded from Git because they are large and
+retain their source terms. `data/README.md` documents the expected input and
+output schema.
 
 ## Reproduce
 
-Use Python 3.10 (required by the current `nemdata` release), create a virtual
-environment, and install the dependencies:
+The tested environment is Python 3.10.19 with the complete resolved environment
+in `requirements-lock.txt`; `requirements.txt` lists only the direct runtime
+dependencies. Python 3.10 is required by the pinned `nemdata==0.3.7`.
 
 ```bash
 python3.10 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements-lock.txt
 ```
 
-Build the panel (the default cache is `~/nem-data/data`):
+Download the same month range for NEM demand. For example:
 
 ```bash
-python src/make_panel.py --cache /path/to/nem-data/data
+nemdata -t demand --start 2020-01 --end 2024-12
 ```
 
-Run the chronological evaluation:
+By default `nemdata` writes under `~/nem-data/data`. Build the demand panel and
+run the chronological evaluation:
 
 ```bash
+python src/make_panel.py --cache ~/nem-data/data \
+  --start 2020-01-01 --end 2024-12-31
 python src/analyze_nem.py
 ```
 
-The analysis uses two worker threads by default to keep memory use predictable.
-Use `--n-jobs 1` on a small machine or increase it deliberately on a larger one.
+To include the optional descriptive generation columns, first download the
+same month range for `unit-scada`, then enable the flag:
 
-Generated files are written to `data/processed/` and `reports/`. Both folders
-are ignored by Git. The main outputs are:
+```bash
+nemdata -t unit-scada --start 2020-01 --end 2024-12
+python src/make_panel.py --cache ~/nem-data/data \
+  --start 2020-01-01 --end 2024-12-31 --include-generation
+```
 
-- `metrics.csv` — validation and test MAE/RMSE for every baseline and model;
-- `test_predictions.csv` — timestamped out-of-sample predictions;
-- `split_manifest.json` — exact split boundaries and feature list;
+The analysis uses two worker threads by default. Use `--n-jobs 1` on a small
+machine or increase it deliberately on a larger one.
+
+## Outputs
+
+Generated data are written to `data/processed/`, and analysis artifacts to
+`reports/`. Both directories are ignored by Git. The outputs are:
+
+- `panel_nem_30min.csv` — validated demand panel, plus optional generation;
+- `demand_region_30min.csv` and `demand_nem_30min.csv` — prepared demand data;
+- `generation_nem_30min.csv` — written only when generation is requested;
+- `metrics.csv` — validation and test MAE/RMSE for all baselines and models;
+- `test_predictions.csv` — timestamped final-period predictions;
+- `split_manifest.json` — data hash, software versions, split boundaries,
+  feature names, horizon, and seed;
 - `forecast_sample.png` — final seven test days; and
-- `xgboost_feature_importance.*` — model feature importance, which must not be
-  interpreted as a causal effect.
+- `xgboost_feature_importance.*` — model-specific, non-causal importance.
 
-## Interpretation and limitations
+No performance number is copied into this README because the result is only
+valid for the exact downloaded data snapshot recorded by the generated
+manifest. Running the pipeline produces the auditable metrics and predictions.
 
-- This is a one-step forecasting study, not a long-term demand projection.
-- It is a rolling one-step evaluation: at each test origin, observed demand up
-  to that origin is available. It is not a recursive multi-step forecast.
-- The split is chronological, but one holdout period does not establish
-  performance across every weather regime or market condition.
-- Calendar and autoregressive demand features do not explain why demand changes.
-- Model feature importance describes use within one fitted model; it is not
-  evidence of causation.
-- Weather, prices, outages, holidays, and other potentially relevant variables
-  are not included.
-- Operational reserve and system-security assessments require additional AEMO
-  datasets and domain-specific definitions; they cannot be inferred by simply
-  subtracting demand from unit-SCADA generation.
+## Tests
 
-The project should therefore be read as a reproducible forecasting exercise,
-not as an operational or policy assessment of the NEM.
+The tests use deterministic synthetic five-minute and half-hour data, so they
+do not download external files. They check interval alignment, completeness,
+duplicate handling, NEM aggregation, forecast-target alignment, chronological
+splits, and the absence of future demand in model features.
+
+```bash
+python -m pip install -r requirements-lock.txt
+python -m pytest -q
+```
+
+The same suite runs automatically on GitHub Actions with Python 3.10.
+
+## Repository structure
+
+```text
+src/make_panel.py       Five-minute to half-hour data preparation
+src/analyze_nem.py      Features, models, baselines, metrics, and artifacts
+tests/                  Deterministic methodological and smoke tests
+data/README.md          Input/output schema and provenance notes
+requirements*.txt       Direct, development, and fully resolved dependencies
+```
+
+## Interpretation limits
+
+- One chronological holdout does not establish performance across every
+  weather regime or market condition.
+- Weather, prices, outages, public holidays, and other useful predictors are
+  outside this intentionally autoregressive benchmark.
+- Calendar and demand-history features predict demand; they do not explain why
+  it changes.
+- XGBoost feature importance is not evidence of causation.
+- AEMO revises its systems and reports over time; preserve the generated input
+  hash and manifest when reporting a particular run.
+
+## Licence
+
+Project code is provided under the BSD 3-Clause licence in `LICENSE`.
+Downloaded AEMO data are not redistributed here. Their use remains subject to
+AEMO's [privacy and legal notices](https://www.aemo.com.au/privacy-and-legal-notices)
+and [copyright permissions](https://www.aemo.com.au/privacy-and-legal-notices/copyright-permissions).

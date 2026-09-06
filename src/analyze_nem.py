@@ -9,7 +9,9 @@ value already known for the target time.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import platform
 from pathlib import Path
 
 import matplotlib
@@ -19,6 +21,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import sklearn
+import xgboost
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from xgboost import XGBRegressor
@@ -45,23 +49,34 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_panel(path: Path) -> pd.DataFrame:
-    frame = pd.read_csv(path, parse_dates=["interval_start"])
+    frame = pd.read_csv(path)
     required = {"interval_start", "NEM_DEMAND_MW"}
     missing = required.difference(frame.columns)
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
 
-    timestamps = frame["interval_start"]
+    timestamps = pd.to_datetime(frame["interval_start"], errors="coerce")
+    if timestamps.isna().any():
+        raise ValueError("The panel contains invalid timestamps.")
     if getattr(timestamps.dt, "tz", None) is not None:
         timestamps = timestamps.dt.tz_localize(None)
     frame["interval_start"] = timestamps
-    frame["NEM_DEMAND_MW"] = pd.to_numeric(
-        frame["NEM_DEMAND_MW"], errors="coerce"
-    )
-    frame = frame.dropna(subset=["interval_start", "NEM_DEMAND_MW"])
+    demand = pd.to_numeric(frame["NEM_DEMAND_MW"], errors="coerce")
+    if demand.isna().any():
+        raise ValueError("The panel contains missing or non-numeric demand values.")
+    if (demand <= 0).any():
+        raise ValueError("The panel contains non-positive demand values.")
+    frame["NEM_DEMAND_MW"] = demand
     frame = frame.sort_values("interval_start")
     if frame["interval_start"].duplicated().any():
         raise ValueError("The panel contains duplicate timestamps.")
+    aligned = (
+        frame["interval_start"].dt.minute.isin((0, 30))
+        & frame["interval_start"].dt.second.eq(0)
+        & frame["interval_start"].dt.microsecond.eq(0)
+    )
+    if not aligned.all():
+        raise ValueError("Panel timestamps must align to 00 or 30 minutes past the hour.")
 
     # Reindexing exposes missing half hours. No imputation is performed: rows
     # whose required history crosses a gap are removed during feature building.
@@ -277,12 +292,21 @@ def save_feature_importance(
     plt.close()
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def main() -> None:
     args = parse_args()
     reports = args.reports.expanduser().resolve()
     reports.mkdir(parents=True, exist_ok=True)
 
-    panel = load_panel(args.data.expanduser().resolve())
+    data_path = args.data.expanduser().resolve()
+    panel = load_panel(data_path)
     examples, feature_columns = build_examples(panel)
     train, validation, test = chronological_split(examples)
 
@@ -326,6 +350,22 @@ def main() -> None:
 
     split_manifest = {
         "forecast_horizon_minutes": 30,
+        "random_seed": args.seed,
+        "input": {
+            "filename": data_path.name,
+            "sha256": sha256_file(data_path),
+            "regular_grid_rows": len(panel),
+            "observed_demand_rows": int(panel["NEM_DEMAND_MW"].notna().sum()),
+            "start": str(panel.index.min()),
+            "end": str(panel.index.max()),
+        },
+        "software": {
+            "python": platform.python_version(),
+            "numpy": np.__version__,
+            "pandas": pd.__version__,
+            "scikit_learn": sklearn.__version__,
+            "xgboost": xgboost.__version__,
+        },
         "total_examples": len(examples),
         "train": {
             "n": len(train),

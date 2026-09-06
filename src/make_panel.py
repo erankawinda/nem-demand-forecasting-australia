@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build a clean 30-minute NEM demand and generation panel.
+"""Build a clean 30-minute NEM demand panel with optional generation data.
 
 The input layout follows ``nemdata``: parquet files named ``clean.parquet``
-under ``<cache>/demand`` and ``<cache>/unit-scada``. Only half-hour bins with
-all six five-minute observations are retained.
+under ``<cache>/demand`` and, optionally, ``<cache>/unit-scada``. Only
+half-hour bins with all six five-minute observations are retained.
 """
 
 from __future__ import annotations
@@ -27,6 +27,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--start", type=str, default=None)
     parser.add_argument("--end", type=str, default=None)
+    parser.add_argument(
+        "--include-generation",
+        action="store_true",
+        help=(
+            "Also prepare unit-SCADA generation and left-join it to the demand "
+            "panel. Generation is not required by the forecasting analysis."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -37,7 +45,10 @@ def load_parquets(root: Path) -> pd.DataFrame:
             f"No clean.parquet files found under {root}. "
             "Download and prepare the dataset with nemdata first."
         )
-    return pd.concat((pd.read_parquet(path) for path in files), ignore_index=True)
+    frame = pd.concat((pd.read_parquet(path) for path in files), ignore_index=True)
+    if frame.empty:
+        raise ValueError(f"The parquet files under {root} contain no rows.")
+    return frame
 
 
 def find_column(frame: pd.DataFrame, candidates: tuple[str, ...]) -> str:
@@ -60,6 +71,21 @@ def parse_timestamp(values: pd.Series) -> pd.Series:
     if getattr(timestamps.dt, "tz", None) is not None:
         timestamps = timestamps.dt.tz_localize(None)
     return timestamps
+
+
+def validate_five_minute_alignment(
+    timestamps: pd.Series, source_label: str
+) -> None:
+    """Require observations to lie on the exact five-minute market grid."""
+    aligned = (
+        timestamps.dt.minute.mod(5).eq(0)
+        & timestamps.dt.second.eq(0)
+        & timestamps.dt.microsecond.eq(0)
+    )
+    if not aligned.all():
+        raise ValueError(
+            f"{source_label} contains timestamps outside the five-minute grid."
+        )
 
 
 def resolve_duplicate_measurements(
@@ -87,7 +113,15 @@ def apply_window(
     if start is not None:
         result = result[result["interval_start"] >= pd.Timestamp(start)]
     if end is not None:
-        result = result[result["interval_start"] <= pd.Timestamp(end)]
+        end_timestamp = pd.Timestamp(end)
+        # A date-only end is interpreted as the complete calendar day. An
+        # explicitly timed end remains inclusive at that exact timestamp.
+        if len(end.strip()) == 10:
+            result = result[
+                result["interval_start"] < end_timestamp + pd.Timedelta(days=1)
+            ]
+        else:
+            result = result[result["interval_start"] <= end_timestamp]
     return result.copy()
 
 
@@ -109,6 +143,7 @@ def prepare_demand(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     demand["REGIONID"] = demand["REGIONID"].astype(str).str.upper().str.strip()
     demand["DEMAND_MW"] = pd.to_numeric(demand["DEMAND_MW"], errors="coerce")
     demand = demand.dropna(subset=["reported_time", "DEMAND_MW"])
+    validate_five_minute_alignment(demand["reported_time"], "Demand data")
     demand = demand[demand["REGIONID"].isin(NEM_REGIONS)]
     demand = resolve_duplicate_measurements(
         demand, ["reported_time", "REGIONID"], "DEMAND_MW"
@@ -169,7 +204,8 @@ def prepare_generation(raw: pd.DataFrame) -> pd.DataFrame:
     )
     generation["reported_time"] = parse_timestamp(generation["reported_time"])
     generation["SCADA_MW"] = pd.to_numeric(generation["SCADA_MW"], errors="coerce")
-    generation = generation.dropna(subset=["reported_time", "SCADA_MW"])
+    generation = generation.dropna(subset=["reported_time", "SCADA_MW", "DUID"])
+    validate_five_minute_alignment(generation["reported_time"], "Unit-SCADA data")
     generation["DUID"] = generation["DUID"].astype(str).str.strip()
     generation = resolve_duplicate_measurements(
         generation, ["reported_time", "DUID"], "SCADA_MW"
@@ -206,7 +242,7 @@ def prepare_generation(raw: pd.DataFrame) -> pd.DataFrame:
 
 def validate_panel(panel: pd.DataFrame) -> None:
     if panel.empty:
-        raise ValueError("The demand and generation datasets have no complete overlap.")
+        raise ValueError("No complete demand half-hours remain in the selected window.")
     if panel["interval_start"].duplicated().any():
         raise ValueError("Duplicate half-hour timestamps remain in the final panel.")
     if not panel["interval_start"].is_monotonic_increasing:
@@ -224,37 +260,41 @@ def main() -> None:
     regional_demand, nem_demand = prepare_demand(
         load_parquets(args.cache.expanduser() / "demand")
     )
-    print("Loading unit-SCADA data...")
-    generation = prepare_generation(
-        load_parquets(args.cache.expanduser() / "unit-scada")
-    )
-
     regional_demand = apply_window(regional_demand, args.start, args.end)
     nem_demand = apply_window(nem_demand, args.start, args.end)
-    generation = apply_window(generation, args.start, args.end)
-    panel = (
-        nem_demand.merge(generation, on="interval_start", how="inner")
-        .sort_values("interval_start")
-        .reset_index(drop=True)
-    )
+    panel = nem_demand.copy()
+
+    generation = None
+    if args.include_generation:
+        print("Loading optional unit-SCADA data...")
+        generation = prepare_generation(
+            load_parquets(args.cache.expanduser() / "unit-scada")
+        )
+        generation = apply_window(generation, args.start, args.end)
+        # Generation is an optional descriptive enrichment. A left join keeps
+        # the demand-forecasting sample independent of SCADA coverage.
+        panel = panel.merge(generation, on="interval_start", how="left")
+
+    panel = panel.sort_values("interval_start").reset_index(drop=True)
     validate_panel(panel)
 
     paths = {
         "regional": output / "demand_region_30min.csv",
         "demand": output / "demand_nem_30min.csv",
-        "generation": output / "generation_nem_30min.csv",
         "panel": output / "panel_nem_30min.csv",
     }
     regional_demand.to_csv(paths["regional"], index=False)
     nem_demand.to_csv(paths["demand"], index=False)
-    generation.to_csv(paths["generation"], index=False)
     panel.to_csv(paths["panel"], index=False)
+    if generation is not None:
+        paths["generation"] = output / "generation_nem_30min.csv"
+        generation.to_csv(paths["generation"], index=False)
 
     expected_grid = pd.date_range(
         panel["interval_start"].iloc[0], panel["interval_start"].iloc[-1], freq="30min"
     )
     print(
-        "Final common window:",
+        "Final demand window:",
         panel["interval_start"].iloc[0],
         "to",
         panel["interval_start"].iloc[-1],
